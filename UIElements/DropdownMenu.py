@@ -1,13 +1,16 @@
 from UIElements.UIElement import UIElement
+from UIElements.Label import Label
 import pygame
 
 class DropdownMenu(UIElement):
-    def __init__(self, x: int, y: int, width: int, height: int, options: list[str], font: pygame.font.Font, onValueChanged = None, start_value = 0) -> None:
+    def __init__(self, x: int, y: int, width: int, height: int, options: list[str], font: pygame.font.Font, on_value_changed = None, start_value = 0) -> None:
         super(DropdownMenu, self).__init__(x, y, width, height)
 
         self.options = [ font.render(option, False, (0, 0, 0)) for option in options ]
+        self.rects = [option.get_rect() for option in self.options]
+        # self.options = [ Label(0, 0, font, text) for text in options ]
         self.option_strings = options.copy()
-        self.onValueChanged = onValueChanged
+        self.on_value_changed = on_value_changed
 
         self.isOpen = False
 
@@ -19,7 +22,9 @@ class DropdownMenu(UIElement):
             self.x, self.y, self.width, self.height
         ))
 
-        surface.blit( self.options[self.chosen], (self.x + 15, self.y + 15) )
+        self.rects[self.chosen].center = (self.x + self.width // 2, self.y + self.height // 2)
+        surface.blit( self.options[self.chosen], self.rects[self.chosen] )
+        # self.options[self.chosen].draw()
 
         if self.isOpen:
             for y, option in enumerate(self.options):
@@ -27,7 +32,9 @@ class DropdownMenu(UIElement):
                 pygame.draw.rect(surface, (180, 180, 180), (
                     self.x, draw_y, self.width, self.height
                 ))
-                surface.blit( option, (self.x + 15, draw_y + 15) )
+                self.rects[y].center = (self.x + self.width // 2, draw_y + self.height // 2)
+                surface.blit( option, self.rects[y] )
+
 
 
     def contains(self, position):
@@ -59,6 +66,6 @@ class DropdownMenu(UIElement):
 
     def set_value(self, value):
         self.chosen = value
-        if self.onValueChanged is not None:
-            self.onValueChanged( self.chosen )
+        if self.on_value_changed is not None:
+            self.on_value_changed( self.chosen )
 

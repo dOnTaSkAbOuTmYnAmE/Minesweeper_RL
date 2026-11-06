@@ -5,6 +5,8 @@ from pygame.event import Event
 from UIElements.UIElement import UIElement
 from UIElements.DropdownMenu import DropdownMenu
 from UIElements.Window import Window
+from UIElements.Checkbox import Checkbox
+from UIElements.Label import Label
 
 from Minesweeper.minesweeper_board import MinesweeperBoard, COVERED_FIELD, MINED
 
@@ -13,13 +15,28 @@ from Minesweeper.model import MinesweeperModel, get_action, get_action_index, ge
 WINDOW_SIZE = (1280, 960)
 SPRITE_SIZE = 8
 TILESET_PATH = "Minesweeper/assets/Minesweeper_tiles_smol.png"
-FONT_PATH = "RPS/assets/BoldPixels.ttf"
-MODEL_PATH = "./Minesweeper/8_8_trans_flag/model.pth"
+FONT_PATH = "Minesweeper/assets/BoldPixels.ttf"
+TEST_NAME = "exp_multi_train_multi_test"
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-HINT_NEUTRAL = (240, 240, 240)
-HINT_GREEN = (140, 255, 140)
+
+NUMBER_COLORS = [
+    (0, 0, 0),
+    (0, 0, 0),
+    (0, 0, 0),
+    (0, 0, 0),
+    (0, 0, 0),
+    (0, 0, 0),
+    (0, 0, 0),
+    (0, 0, 0),
+]
+
+PANEL_BG = WHITE
+GAME_BG = (240, 240, 240)
+
+SQUARE_NEUTRAL = WHITE
+SQUARE_WIN = (140, 255, 140)
 
 DIFFICULTIES = [
     (8, 8, 12),
@@ -28,7 +45,7 @@ DIFFICULTIES = [
 ]
 
 model = MinesweeperModel(5)
-model.load_state_dict( torch.load("./Minesweeper/multi_train_multi_test/model.pth") )
+model.load_state_dict( torch.load(f"./Minesweeper/{TEST_NAME}/model.pth") )
 
 pygame.init()
 
@@ -44,7 +61,7 @@ class Rect(UIElement):
 
         self.board_x = board_x
         self.board_y = board_y
-        self.text: pygame.Surface | None = None
+        self.label: Label | None = None
 
         self.__update_background__()
 
@@ -66,6 +83,20 @@ class Rect(UIElement):
         self.clr = color
         self.__update_background__()
 
+    def set_position(self, x, y):
+        self.x = x
+        self.y = y
+
+        if self.label != None:
+            self.label.set_center(self.x + self.width / 2, self.y + self.height / 2) 
+
+    def set_text(self, font, text, color = (0, 0, 0)):
+        if self.label == None:
+            self.label = Label(self.x, self.y, font, text, color)
+
+        self.label.set_center(self.x + self.width / 2, self.y + self.height / 2) 
+
+
 
     def __update_background__(self):
         color_image = pygame.Surface(self.image.get_size())
@@ -78,8 +109,8 @@ class Rect(UIElement):
     def draw(self, surface: pygame.Surface):
         surface.blit(self.background, (self.x, self.y), special_flags=pygame.BLEND_RGB_MULT)
 
-        if self.text != None:
-            surface.blit(self.text, ( self.x + 15, self.y + 5))
+        if self.label != None:
+            self.label.draw(surface)
 
 
 
@@ -93,6 +124,9 @@ class MinesweeperWindow(Window):
 
         self.scale = 48
 
+        self.panel_width = 450
+        self.scroll_speed = 1
+
         self.padding_x = 10
         self.padding_y = 50
 
@@ -101,16 +135,15 @@ class MinesweeperWindow(Window):
 
         self.is_ctrl_pressed = False
 
-        self.is_auto_solving = False
         self.solve_cooldown = 0
         self.next_solve_id = (-1, -1)
         self.next_solve_action = -1
 
-        self.font = pygame.font.Font('RPS/assets/BoldPixels.ttf', int(self.scale * 0.8))
-        self.font_smol = pygame.font.Font('RPS/assets/BoldPixels.ttf', int(self.scale * 0.4))
+        self.font = pygame.font.Font(FONT_PATH, int(self.scale * 0.8))
+        self.font_smol = pygame.font.Font(FONT_PATH, int(self.scale * 0.4))
 
         self.tiles_scale = 8
-        spritesheet = pygame.image.load("Minesweeper/assets/Minesweeper_tiles_smol.png")
+        spritesheet = pygame.image.load(TILESET_PATH)
         self.tiles = [
             pygame.Surface((self.tiles_scale, self.tiles_scale)),
             pygame.Surface((self.tiles_scale, self.tiles_scale)),
@@ -134,44 +167,42 @@ class MinesweeperWindow(Window):
         self.squares: list[list[Rect]] = []
         self.probability_labels: list[list[list[pygame.Surface]]] = []
 
-        self.mines_text = self.font.render(f"{self.mines}", False, (0, 0, 0))
+        self.mines_text = Label(0, 0, self.font, "0")
 
         self.difficulty = DropdownMenu(
-            200, 20, 200, 50, ["Mała", "Średnia", "Duża"], self.font, self.on_difficulty_change, start_value=0
+            200, 20, 300, 50, ["Mała", "Średnia", "Duża"], self.font, self.on_difficulty_change, start_value=0
         )
-        self.network_show_mode = DropdownMenu(450, 20, 200, 50, ["Nic", "Kliknięcie", "Flaga"], self.font, self.get_network_data, start_value=1)
 
-        self.auto_solve_switch = Rect(700, 20, 40, 40, pygame.transform.scale_by(self.tiles[0], 6), 0, 0)
+        self.show_output_label = Label(0, 0, self.font, "Pokaż wyjście agenta")
+        self.show_network_output = Checkbox(0, 0, 50, 50, on_value_changed=self.get_network_data)
+
+        self.auto_solve_label = Label(0, 0, self.font, "Auto rozwiązywanie")
+        self.auto_solve_switch = Checkbox(0, 0, 50, 50)
+
+
+        self.panel_elements = [[self.auto_solve_label, self.auto_solve_switch], [self.show_output_label, self.show_network_output], [self.difficulty]]
 
         self.on_difficulty_change(0)
 
 
     def __update__(self, delta: float):
-        self.screen.fill((255, 255, 255))
+        self.screen.fill(GAME_BG)
 
         for row in self.squares:
             for rect in row:
                 rect.draw(self.screen)
 
-        # for y, row in enumerate(self.probability_labels):
-        #     for x, labels in enumerate(row):
-        #         if self.board.discovered_fields[y][x] == COVERED_FIELD:
-        #             self.screen.blit( labels[0], (self.padding_x + x * self.scale, self.padding_y + y * self.scale + 45 ) )
-        #             self.screen.blit( labels[1], (self.padding_x + x * self.scale, self.padding_y + (y + 0.5) * self.scale + 45 ) )
+        self.mines_text.draw(self.screen)
 
-                # square.x = int(self.padding_x + (self.scale + self.gap) * x - self.gap)
-                # square.y = int(
-                #     self.padding_y + 45 + (self.scale + self.gap) * y - self.gap
-                # )
 
-        self.auto_solve_switch.draw(self.screen)
+        pygame.draw.rect(self.screen, PANEL_BG, (0, 0, self.panel_width,  self.screen.get_size()[1]))
 
-        self.screen.blit(self.mines_text, (self.padding_x, self.padding_y))
+        for group in self.panel_elements:
+            for element in group:
+                element.draw(self.screen)
 
-        self.difficulty.draw(self.screen)
-        self.network_show_mode.draw(self.screen)
 
-        if self.is_auto_solving and self.next_solve_action != -1 and self.next_solve_id != -1:
+        if self.auto_solve_switch.checked and self.next_solve_action != -1 and self.next_solve_id != -1:
             self.solve_cooldown += delta
 
             if self.solve_cooldown >= 1:
@@ -187,6 +218,7 @@ class MinesweeperWindow(Window):
                 self.get_network_data()
                 
                 self.solve_cooldown = 0
+
 
 
     def __handle_events__(self, event: Event):
@@ -215,17 +247,14 @@ class MinesweeperWindow(Window):
 
         if button in (4, 5):
             if self.is_ctrl_pressed and is_pressed:
-                self.scale = max(8, self.scale + (0.5 if button == 4 else -0.5))
+                self.scale = max(8, self.scale + (self.scroll_speed if button == 4 else -self.scroll_speed))
                 self.on_scale_change()
             return
 
         mouse_pos = pygame.mouse.get_pos()
-        if self.difficulty.on_click(mouse_pos) or self.network_show_mode.on_click(mouse_pos):
+        if self.difficulty.on_click(mouse_pos) or self.show_network_output.on_click(mouse_pos) or self.auto_solve_switch.on_click(mouse_pos):
             return
 
-        if self.auto_solve_switch.contains(mouse_pos):
-            self.is_auto_solving = not self.is_auto_solving
-            self.solve_cooldown = 0
 
         for row in self.squares:
             for square in row:
@@ -256,10 +285,10 @@ class MinesweeperWindow(Window):
             for x, state in enumerate(row):
                 square = self.squares[y][x]
                 square.color = WHITE
-                square.text = None
+                square.label = None
 
                 if state == "w":
-                    square.color = HINT_GREEN
+                    square.color = SQUARE_WIN
                     continue
                 if state == "x":
                     square.image = self.scaled_tiles[0]
@@ -270,10 +299,12 @@ class MinesweeperWindow(Window):
                 else:
                     square.image = self.scaled_tiles[2]
                     if state != "0":
-                        square.text = self.font.render(state, False, BLACK)
+                        # square.label = self.font.render(state, False, BLACK)
+                        square.set_text(self.font, state, NUMBER_COLORS[ int(state) ])
         
         mines = self.board.number_of_mines - self.board.flag_count
-        self.mines_text = self.font.render(f"{mines}", False, (0, 0, 0))
+        # self.mines_text = self.font.render(f"{mines}", False, (0, 0, 0))
+        self.mines_text.set_text(f"{mines}")
 
 
     def get_network_data(self, *args):
@@ -283,8 +314,8 @@ class MinesweeperWindow(Window):
                     if self.board.discovered_fields[ y ][ x ] == COVERED_FIELD or self.board.mines[ y ][ x ] == MINED:
 
                         if not self.board.has_won:
-                            self.squares[y][x].color = HINT_NEUTRAL
-                        self.squares[y][x].text = None
+                            self.squares[y][x].color = SQUARE_NEUTRAL
+                        self.squares[y][x].label = None
 
 
             self.next_solve_id = (-1, -1)
@@ -307,39 +338,30 @@ class MinesweeperWindow(Window):
             probs = dist.probs.squeeze(0)
 
 
-        for i in range(self.board_x * self.board_y):
-            y = i // self.board_x
-            x = i % self.board_x
-            if self.board.discovered_fields[ y ][ x ] != COVERED_FIELD:
-                continue
+        if self.show_network_output.checked:
+            for i in range(self.board_x * self.board_y):
+                y = i // self.board_x
+                x = i % self.board_x
+                if self.board.discovered_fields[ y ][ x ] != COVERED_FIELD:
+                    continue
 
-            prob_click = probs[i].item()
-            prob_flag = probs[i + self.board_x * self.board_y] + probs[i + self.board_x * self.board_y * 2].item()
-            # self.squares[y][x].text = self.font_smol.render(f"{prob_click*100:.1f}\n{probs_flag*100:.1f}", False, BLACK)
+                prob_click = probs[i].item()
+                prob_flag = probs[i + self.board_x * self.board_y] + probs[i + self.board_x * self.board_y * 2].item()
+                # self.squares[y][x].text = self.font_smol.render(f"{prob_click*100:.1f}\n{probs_flag*100:.1f}", False, BLACK)
 
-            self.probability_labels[y][x] = [
-                self.font_smol.render(f"{prob_click*100:.1f}", False, BLACK),
-                self.font_smol.render(f"{prob_flag*100:.1f}", False, BLACK)
-            ]
+                self.probability_labels[y][x] = [
+                    self.font_smol.render(f"{prob_click*100:.1f}", False, BLACK),
+                    self.font_smol.render(f"{prob_flag*100:.1f}", False, BLACK)
+                ]
 
-            if prob_click >= prob_flag:
-                self.squares[y][x].color = ( 240 * (1 - prob_click), 240, 240 * (1 - prob_click) )
-            else:
-                self.squares[y][x].color = ( 240, 240 * (1 - prob_flag), 240 * (1 - prob_flag) )
-
-            # if self.network_show_mode.chosen == 1:
-            #     self.squares[y][x].color = ( 240 * (1 - prob_click), 240, 240 * (1 - prob_click) )
-
-            #     self.squares[y][x].text = self.font_smol.render(f"{prob_click*100:.1f}", False, BLACK)
-            
-            # elif self.network_show_mode.chosen == 2:
-            #     self.squares[y][x].color = ( 240, 240 * (1 - probs_flag), 240 * (1 - probs_flag) )
-
-            #     self.squares[y][x].text = self.font_smol.render(f"{probs_flag*100:.1f}", False, BLACK)
-            
-            # else:
-            #     self.squares[y][x].color = HINT_NEUTRAL
-            #     self.squares[y][x].text = None
+                if prob_click >= prob_flag:
+                    self.squares[y][x].color = ( SQUARE_NEUTRAL[0] * (1 - prob_click), SQUARE_NEUTRAL[1], SQUARE_NEUTRAL[2] * (1 - prob_click) )
+                else:
+                    self.squares[y][x].color = ( SQUARE_NEUTRAL[0], SQUARE_NEUTRAL[1] * (1 - prob_flag), SQUARE_NEUTRAL[2] * (1 - prob_flag) )
+        else:
+            for x in range(self.board_x):
+                for y in range(self.board_y):
+                    self.squares[y][x].color = SQUARE_NEUTRAL
 
         # for plane in dist.probs.reshape([3, self.board_y, self.board_x]):
         #     for row in plane:
@@ -350,8 +372,8 @@ class MinesweeperWindow(Window):
 
         actions = ["Click", "Flag", "Unflag"]
         ind, action = get_action(index, self.board_x, self.board_y)
-        print(f"{value.detach()[0].item():.3f}")
-        print(actions[action], (ind % self.board_x) + 1, (ind // self.board_x) + 1)
+        # print(f"{value.detach()[0].item():.3f}")
+        # print(actions[action], (ind % self.board_x) + 1, (ind // self.board_x) + 1)
 
         self.next_solve_id = (ind % self.board_x, ind // self.board_x)
         self.next_solve_action = action
@@ -366,14 +388,30 @@ class MinesweeperWindow(Window):
         board_height = self.board_y * self.scale
 
         self.padding_x = (width - board_width) / 2
-        self.padding_y = (height - board_height) / 2 - 45
+        self.padding_y = (height - board_height) / 2 
 
         for y, row in enumerate(self.squares):
             for x, square in enumerate(row):
-                square.x = int(self.padding_x + self.scale * x)
-                square.y = int(
-                    self.padding_y + 45 + self.scale * y
-                )
+                square.set_position(self.padding_x + self.scale * x + self.panel_width / 2, self.padding_y + self.scale * y)
+
+        pad_x = 25
+        pad_y = 10
+        pos_x = pad_x
+        pos_y = pad_y
+
+
+        self.auto_solve_switch.x = self.panel_width - 50 - 10
+        self.auto_solve_switch.y = pad_y
+        self.auto_solve_label.set_position(pad_x, pad_y)
+
+
+        self.show_network_output.x = self.panel_width - 50 - 10
+        self.show_network_output.y = pad_y + 60
+        self.show_output_label.set_position(pad_x, pad_y + 60)
+
+        self.difficulty.x = (self.panel_width - self.difficulty.width) / 2
+        self.difficulty.y = pad_y + 120
+
 
 
     def on_scale_change(self):
@@ -393,10 +431,10 @@ class MinesweeperWindow(Window):
 
         self.board.start_game(self.board_x, self.board_y, self.mines)
 
-        self.mines_text = self.font.render(f"{self.mines}", False, (0, 0, 0))
+        self.mines_text.set_text(f"{self.mines}")
 
         self.squares = [[
-            Rect( int( x * self.scale + self.padding_x ),
+            Rect( int( x * self.scale + self.padding_x + self.panel_width / 2),
                  int(y * self.scale + self.padding_y ), 
                  int(self.scale),
                  int(self.scale),
